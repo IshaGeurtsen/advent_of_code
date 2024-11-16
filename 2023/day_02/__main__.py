@@ -8,31 +8,38 @@ import typing
 import operator
 import logging
 
+import parselib
+
 @functools.total_ordering
 class Count:
-    def __init__(self, count: str):
-        count_i = int(count)
-        if count_i <= 0:
+    class CountParser(parselib.Parser["Count"]):
+        def __call__(self, text: str) -> parselib.Ok[tuple["Count", str]] | parselib.Err[str]:
+            try:
+                return parselib.Ok((Count(int(text)), ""))
+            except ValueError as e:
+                return parselib.Err(repr(e))
+    def __init__(self, count: int):
+        if count <= 0:
             raise ValueError
-        self.count = count_i
+        self.count = count
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return repr(self.count)
 
-    def __eq__(self, other):
+    def __eq__(self, other: typing.Any) -> bool:
         if isinstance(other, Count):
             return self.count == other.count
         return NotImplemented
 
-    def __lt__(self, other):
+    def __lt__(self, other: typing.Any) -> bool:
         if isinstance(other, Count):
             return self.count < other.count
         return NotImplemented
 
-    def __le__(self, other):
-        return self == other or self < other
+    def __le__(self, other: typing.Any) -> bool:
+        return bool(self == other or self < other)
 
-    def __rmul__(self, other):
+    def __rmul__(self, other: int | typing.Any) -> int:
         if isinstance(other, int):
             return other * self.count
         return NotImplemented
@@ -42,12 +49,12 @@ class Power:
     def __init__(self, value: int = 1):
         self.value = value
 
-    def __mul__(self, other):
+    def __mul__(self, other: Count | typing.Any) -> "Power":
         if isinstance(other, Count):
             return Power(self.value * other)
         return NotImplemented
 
-    def __add__(self, other):
+    def __add__(self, other: "Power | typing.Any") -> "Power":
         if isinstance(other, Power):
             return Power(self.value + other.value)
         return NotImplemented
@@ -57,35 +64,49 @@ class Power:
 
 
 class Color:
+    class ColorParser(parselib.Parser["Color"]):
+        def __call__(self, color: str) -> parselib.Ok[tuple["Color", str]] | parselib.Err[str]:
+            if color not in {"red", "green", "blue"}:
+                return parselib.Err(f"invalid color: {color}")
+            return parselib.Ok((Color(color), ""))
     def __init__(self, color: str):
-        if color not in {"red", "green", "blue"}:
-            raise ValueError(color)
         self.color = color
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.color
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(self.color)
 
-    def __eq__(self, other):
+    def __eq__(self, other: "Color | typing.Any") -> bool:
         if isinstance(other, Color):
             return self.color == other.color
         return NotImplemented
 
 
 class Cube:
-    def __init__(self, cube: str):
-        count, sep, color = cube.strip().partition(" ")
-        if sep != " ":
-            raise ValueError
-        self.count = Count(count)
-        self.color = Color(color)
+    class CubeParser(parselib.Parser["Cube"]):
+        def __call__(self, text: str) -> parselib.Ok[tuple["Cube", str]] | parselib.Err[str]:
+            count, sep, color = text.strip().partition(" ")
+            if sep != " ":
+                return parselib.Err("invalid sep")
+            color_result = Color.ColorParser()(color)
+            if isinstance(color_result, parselib.Err):
+                return color_result
+            count_result = Count.CountParser()(count)
+            if isinstance(count_result, parselib.Err):
+                return count_result
+            return parselib.Ok((Cube(count_result.value[0], color_result.value[0]), ""))
 
-    def __repr__(self):
+
+    def __init__(self, count: Count, color: Color):
+        self.count = count
+        self.color = color
+
+    def __repr__(self) -> str:
         return f"{self.count} {self.color}"
 
-    def is_possible(self, start: "Subset"):
+    def is_possible(self, start: "Subset") -> bool:
         return self.color in start and self.count <= start[self.color].count
 
     def match_color(self, other: "Color | Cube") -> bool:
@@ -98,7 +119,7 @@ class Cube:
 
     def merge_minimum(self, other: "Cube") -> "Cube":
         if self.match_color(other):
-            return Cube(repr(max(self.count, other.count)) + " " + repr(self.color))
+            return Cube(max(self.count, other.count), self.color)
         raise ValueError
 
     def __rmul__(self, other: Power) -> Power:
@@ -106,24 +127,22 @@ class Cube:
 
 
 class Subset:
-    def __init__(self, subset: str):
-        self.cubes: list[Cube] = []
-        for cube in subset.split(", "):
-            self.cubes.append(Cube(cube))
+    def __init__(self, cubes: list[Cube]):
+        self.cubes = cubes
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return ", ".join(map(repr, self.cubes))
 
     def is_possible(self, start: "Subset") -> bool:
         return all(map(functools.partial(Cube.is_possible, start=start), self.cubes))
         raise NotImplementedError(vars())
 
-    def __contains__(self, other):
+    def __contains__(self, other: Color|typing.Any) -> bool:
         if isinstance(other, Color):
             return any(cube.match_color(other) for cube in self.cubes)
-        return NotImplementedError
+        return NotImplemented
 
-    def __getitem__(self, other) -> Cube:
+    def __getitem__(self, other: Color | Cube) -> Cube:
         if isinstance(other, (Color, Cube)):
             for cube in self.cubes:
                 if cube.match_color(other):
@@ -134,33 +153,28 @@ class Subset:
     def power(self) -> Power:
         return functools.reduce(operator.mul, self.cubes, Power())
 
-    def merge_minimum(self, other: "Subset"):
-        cubes = []
+    def merge_minimum(self, other: "Subset") -> "Subset":
+        cubes: list[Cube] = []
         for cube in self.cubes:
             try:
-                cubes.append(repr(cube.merge_minimum(other[cube])))
+                cubes.append(cube.merge_minimum(other[cube]))
             except KeyError:
-                cubes.append(repr(cube))
+                cubes.append(cube)
         for cube in other.cubes:
             try:
                 self[cube]
             except KeyError:
-                cubes.append(repr(cube))
-        result = Subset(", ".join(cubes))
+                cubes.append(cube)
+        result = Subset(cubes)
         logging.debug("merge %s + %s -> %s", self, other, result)
         return result
 
 
 class Game:
-    def __init__(self, line: str):
-        self.id, sep, subsets = line.removeprefix("Game ").partition(": ")
-        if sep != ": ":
-            raise ValueError(line)
-        self.subsets: list[Subset] = []
-        for subset in subsets.split("; "):
-            self.subsets.append(Subset(subset))
-
-    def __repr__(self):
+    def __init__(self, id: int, subsets: list[Subset]):
+        self.id = id
+        self.subsets = subsets
+    def __repr__(self) -> str:
         return f"Game {self.id}: {"; ".join(map(repr, self.subsets))}"
 
     def get_id(self) -> int:
@@ -179,10 +193,8 @@ class Game:
 
 
 class Games:
-    def __init__(self, lines: typing.Iterable[str]):
-        self.games: list[Game] = []
-        for line in lines:
-            self.games.append(Game(line))
+    def __init__(self, games: list[Game]):
+        self.games = games
 
     def count_possible(self, start: Subset) -> int:
         return sum(
@@ -202,20 +214,62 @@ class Games:
         )
 
 
-def parse(path: pathlib.Path, stack: contextlib.ExitStack) -> Games:
-    file = stack.enter_context(path.open("rt"))
-    return Games(file)
+class SubSetParser(parselib.Parser[Subset]):
+    def __init__(self) -> None:
+        self.cube_parser = Cube.CubeParser()
+    def __call__(self, text: str) -> parselib.Ok[tuple[Subset, str]] | parselib.Err[str]:
+        cube_list: list[Cube] = []
+        while text:
+            cube, sep, text = text.partition(", ")
+            result = self.cube_parser(cube)
+            if isinstance(result, parselib.Err):
+                return result
+            cube_list.append(result.value[0])
 
+        return parselib.Ok((Subset(cube_list), text))
+
+class GameParser(parselib.Parser[Game]):
+    def __init__(self) -> None:
+        self.subset_parser = SubSetParser()
+    def __call__(self, text: str) -> parselib.Ok[tuple[Game, str]] | parselib.Err[str]:
+        id, sep, subsets_s = text.removeprefix("Game ").partition(": ")
+        if sep != ": ":
+            raise ValueError(text)
+        subsets_l: list[Subset] = []
+        for subset in subsets_s.split("; "):
+            result = self.subset_parser(subset)
+            if isinstance(result, parselib.Err):
+                return result
+            if result.value[1]:
+                return parselib.Err("expected empty remainder")
+            subsets_l.append(result.value[0])
+
+        return parselib.Ok((Game(int(id), subsets_l), text))
+
+class Parser(parselib.Parser[Games]):
+    def __init__(self) -> None:
+        self.game_parser = GameParser()
+    def __call__(self, text: str) -> parselib.Ok[tuple[Games, str]] | parselib.Err[str]:
+        games = []
+        while text:
+            line, sep, text = text.partition("\n")
+            result = self.game_parser(line)
+            if isinstance(result, parselib.Ok):
+                games.append(result.value[0])
+            else:
+                return result
+        return parselib.Ok((Games(games), text))
 
 def main(args: argparse.Namespace) -> None | int | str:
     try:
         if args.debug:
             logging.basicConfig(level=logging.DEBUG)
         with contextlib.ExitStack() as stack:
-            games = parse(args.input, stack)
+            parser = parselib.FileParser(args.input, stack, Parser)
+            games = parser()
             sys.stdout.write(
                 "part 1: {result!s}".format(
-                    result=games.count_possible(Subset("12 red, 13 green, 14 blue"))
+                    result=games.count_possible(Subset(list(map(Cube, map(Count, [12, 13, 14]), map(Color, ["red", "green", "blue"])))))
                 )
             )
             sys.stdout.write("\n")

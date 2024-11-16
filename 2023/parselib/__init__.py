@@ -17,8 +17,13 @@ class Ok(typing.Generic[T]):
         return self.__value
 
     def __repr__(self) -> str:
-        return f"{type(self).__name__}[{self.value}]"
-
+        name = type(self).__name__
+        value = repr(self.value)
+        if len(value) < 100:
+            return f"{name}[{value}]"
+        short_value = value[:100]
+        return f"{name}[{short_value}...]"
+            
 class Step(typing.Generic[T], Ok[tuple[T, str]]):
     @property
     def step_value(self) -> T:
@@ -39,11 +44,18 @@ class Err(typing.Generic[T]):
         return self.__error
 
     def __repr__(self) -> str:
-        return f"{type(self).__name__}[{self.error}]"
+        error = repr(self.error)
+        if len(error) > 100:
+            error = error[:100] + "..."
+        return f"{type(self).__name__}[{error}]"
 
 class Parser(typing.Generic[T]):
     def __call__(self, text: str) -> Ok[tuple[T, str]] | Err[str]:
-        return Err(repr(NotImplementedError(vars())))
+        import inspect
+        import pathlib
+        file = pathlib.PurePosixPath(pathlib.Path(inspect.getfile(type(self))).relative_to(pathlib.Path.cwd()))
+        line = inspect.getsourcelines(type(self))[-1]
+        return Err(f"not implemented: {type(self).__qualname__} :: ({file}:{line})")
 
 class FileParser(typing.Generic[T]):
     def __init__(self, path: pathlib.Path, stack: contextlib.ExitStack, parser: type[Parser[T]]):
