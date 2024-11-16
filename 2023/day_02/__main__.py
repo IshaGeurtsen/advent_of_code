@@ -8,7 +8,6 @@ import typing
 import operator
 import logging
 
-
 @functools.total_ordering
 class Count:
     def __init__(self, count: str):

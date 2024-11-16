@@ -6,7 +6,10 @@ import typing
 import sys
 import string
 import itertools
+import os
+import io
 
+from parselib import Parser, FileParser, Err, Ok, Step
 
 class CalibrationDigit:
     def __init__(self, digit: int):
@@ -16,10 +19,14 @@ class CalibrationDigit:
 
     def as_integer(self) -> int:
         return self.__digit
+    
+    def __repr__(self) -> str:
+        return f"'{self.__digit}"
 
 
 class SpelledCalibrationDigit(CalibrationDigit):
-    pass
+    def __repr__(self) -> str:
+        return f'"{self.__digit}'
 
 
 class CalibrationValue:
@@ -37,12 +44,14 @@ class CalibrationValue:
     def as_integer_from_spelled(self) -> int:
         return self.__digits[0].as_integer() * 10 + self.__digits[-1].as_integer()
 
+    def __repr__(self) -> str:
+        return type(self).__name__ + repr(self.__digits)
 
 class CalibrationValueSum:
     def __init__(self, value: int):
         self.__value = value
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"<CalibrationValueSum = {self.__value}>"
 
     @classmethod
@@ -97,24 +106,74 @@ class Line:
                         )
         return CalibrationValue(digits)
 
+class DigitParser(Parser[CalibrationDigit]):
+    class NotADigit(Err[str]):
+        pass
+    def __call__(self, text: str) -> Ok[tuple[CalibrationDigit, str]] | Err[str]:
+        if text[0] in string.digits:
+            return Step((CalibrationDigit(int(text[0])), text[1:]))
+        return self.NotADigit(repr(text[0]))
 
-class Parser:
-    def __init__(self, path: pathlib.Path, stack: contextlib.ExitStack):
-        self.__file = stack.enter_context(path.open("rt"))
+class SpelledDigitParser(Parser[CalibrationDigit]):
+    def __init__(self) -> None:
+        self.digits = list(enumerate("one, two, three, four, five, six, seven, eight, and nine".replace(" and ", " ").split(", "), 1))
+        self.digit_parser = DigitParser()
+    def __call__(self, text: str) -> Ok[tuple[CalibrationDigit, str]] | Err[str]:
+        for value, digit in self.digits:
+            if text.startswith(digit):
+                return Step((SpelledCalibrationDigit(value), text[1:]))
+        else:
+            return self.digit_parser(text)
 
-    def calibration_values(self) -> CalibrationValues:
+class CharacterParser(Parser[str]):
+    def __call__(self, text: str) -> Ok[tuple[str, str]] | Err[str]:
+        return Step((text[0], text[1:]))
+
+class LineParser(Parser[CalibrationValue]):
+    def __init__(self) -> None:
+        self.digit_parser = SpelledDigitParser()
+        self.char_parser = CharacterParser()
+    def __call__(self, text: str) -> Ok[tuple[CalibrationValue, str]] | Err[str]:
+        line, sep, remainder = text.partition("\n")
+        digits: list[CalibrationDigit] = []
+        while line:
+            result = self.digit_parser(line)
+            if isinstance(result, Ok):
+                digit, line = result.value
+                digits.append(digit)
+                continue
+            elif isinstance(result, DigitParser.NotADigit):
+                char_result = self.char_parser(line)
+                if isinstance(char_result, Ok):
+                    _, line = char_result.value
+                else:
+                    return char_result
+            else:
+                return result
+        return Step((CalibrationValue(digits), remainder))
+
+class Day1Parser(Parser[CalibrationValues]):
+    def __init__(self) -> None:
+        self.line_parser = LineParser()
+
+    def __call__(self, text: str) -> Ok[tuple[CalibrationValues, str]] | Err[str]:
         values: list[CalibrationValue] = []
-        for line in map(Line, self.__file):
-            value = line.get_calibration_value()
-            values.append(value)
-        return CalibrationValues(values)
-
+        while text:
+            result = self.line_parser(text)
+            if isinstance(result, Ok):
+                value, text = result.value
+                values.append(value)
+            elif isinstance(result, Err):
+                return result
+            else:
+                raise TypeError
+        return Step((CalibrationValues(values), text))
 
 def main(args: argparse.Namespace) -> None | int | str:
     try:
         with contextlib.ExitStack() as stack:
-            parser = Parser(args.input, stack)
-            calibration_values = parser.calibration_values()
+            parser = FileParser(args.input, stack, Day1Parser)
+            calibration_values = parser()
             sys.stdout.write(
                 "part 1: {result!s}".format(result=calibration_values.sum())
             )
