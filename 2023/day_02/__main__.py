@@ -4,6 +4,9 @@ import pathlib
 import sys
 import traceback
 import functools
+import typing
+import operator
+import logging
 
 
 @functools.total_ordering
@@ -26,6 +29,32 @@ class Count:
         if isinstance(other, Count):
             return self.count < other.count
         return NotImplemented
+
+    def __le__(self, other):
+        return self == other or self < other
+
+    def __rmul__(self, other):
+        if isinstance(other, int):
+            return other * self.count
+        return NotImplemented
+
+
+class Power:
+    def __init__(self, value: int = 1):
+        self.value = value
+
+    def __mul__(self, other):
+        if isinstance(other, Count):
+            return Power(self.value * other)
+        return NotImplemented
+
+    def __add__(self, other):
+        if isinstance(other, Power):
+            return Power(self.value + other.value)
+        return NotImplemented
+
+    def __repr__(self) -> str:
+        return f"Power<{self.value}>"
 
 
 class Color:
@@ -57,9 +86,24 @@ class Cube:
     def __repr__(self):
         return f"{self.count} {self.color}"
 
-    def is_possible(self, start: dict[Color, Count]):
-        return self.color in start and self.count <= start[self.color]
-        raise NotImplementedError(vars())
+    def is_possible(self, start: "Subset"):
+        return self.color in start and self.count <= start[self.color].count
+
+    def match_color(self, other: "Color | Cube") -> bool:
+        if isinstance(other, Color):
+            return self.color == other
+        elif isinstance(other, Cube):
+            return self.color == other.color
+        else:
+            raise TypeError
+
+    def merge_minimum(self, other: "Cube") -> "Cube":
+        if self.match_color(other):
+            return Cube(repr(max(self.count, other.count)) + " " + repr(self.color))
+        raise ValueError
+
+    def __rmul__(self, other: Power) -> Power:
+        return other * self.count
 
 
 class Subset:
@@ -71,9 +115,41 @@ class Subset:
     def __repr__(self):
         return ", ".join(map(repr, self.cubes))
 
-    def is_possible(self, start: dict[Color, Count]) -> bool:
+    def is_possible(self, start: "Subset") -> bool:
         return all(map(functools.partial(Cube.is_possible, start=start), self.cubes))
         raise NotImplementedError(vars())
+
+    def __contains__(self, other):
+        if isinstance(other, Color):
+            return any(cube.match_color(other) for cube in self.cubes)
+        return NotImplementedError
+
+    def __getitem__(self, other) -> Cube:
+        if isinstance(other, (Color, Cube)):
+            for cube in self.cubes:
+                if cube.match_color(other):
+                    return cube
+            raise KeyError
+        raise TypeError
+
+    def power(self) -> Power:
+        return functools.reduce(operator.mul, self.cubes, Power())
+
+    def merge_minimum(self, other: "Subset"):
+        cubes = []
+        for cube in self.cubes:
+            try:
+                cubes.append(repr(cube.merge_minimum(other[cube])))
+            except KeyError:
+                cubes.append(repr(cube))
+        for cube in other.cubes:
+            try:
+                self[cube]
+            except KeyError:
+                cubes.append(repr(cube))
+        result = Subset(", ".join(cubes))
+        logging.debug("merge %s + %s -> %s", self, other, result)
+        return result
 
 
 class Game:
@@ -91,50 +167,63 @@ class Game:
     def get_id(self) -> int:
         return int(self.id)
 
-    def is_possible(self, start: dict[Color, Count]) -> bool:
+    def is_possible(self, start: Subset) -> bool:
         return all(
             map(functools.partial(Subset.is_possible, start=start), self.subsets)
         )
 
+    def get_minimum(self) -> Subset:
+        return functools.reduce(Subset.merge_minimum, self.subsets)
 
-class Parser:
-    def __init__(self, path: pathlib.Path, stack: contextlib.ExitStack):
-        self.__file = stack.enter_context(path.open("rt"))
-
-    def parse(self) -> list[Game]:
-        games: list[Game] = []
-        for line in self.__file:
-            games.append(Game(line))
-        return games
+    def get_power(self) -> Power:
+        return self.get_minimum().power()
 
 
-def count_possible(games: list[Game], start: dict[Color, Count]) -> int:
-    return sum(
-        map(
-            Game.get_id, filter(functools.partial(Game.is_possible, start=start), games)
+class Games:
+    def __init__(self, lines: typing.Iterable[str]):
+        self.games: list[Game] = []
+        for line in lines:
+            self.games.append(Game(line))
+
+    def count_possible(self, start: Subset) -> int:
+        return sum(
+            map(
+                Game.get_id,
+                filter(functools.partial(Game.is_possible, start=start), self.games),
+            )
         )
-    )
+
+    def power_cubes(self) -> Power:
+        return functools.reduce(operator.add, map(Game.get_power, self.games))
+
+    def get_minimum(self) -> Subset:
+        return functools.reduce(
+            Subset.merge_minimum,
+            map(Game.get_minimum, self.games),
+        )
+
+
+def parse(path: pathlib.Path, stack: contextlib.ExitStack) -> Games:
+    file = stack.enter_context(path.open("rt"))
+    return Games(file)
 
 
 def main(args: argparse.Namespace) -> None | int | str:
     try:
+        if args.debug:
+            logging.basicConfig(level=logging.DEBUG)
         with contextlib.ExitStack() as stack:
-            parser = Parser(args.input, stack)
-            games = parser.parse()
+            games = parse(args.input, stack)
             sys.stdout.write(
                 "part 1: {result!s}".format(
-                    result=count_possible(
-                        games,
-                        {
-                            Color("red"): Count("12"),
-                            Color("green"): Count("13"),
-                            Color("blue"): Count("14"),
-                        },
-                    )
+                    result=games.count_possible(Subset("12 red, 13 green, 14 blue"))
                 )
             )
             sys.stdout.write("\n")
-            sys.stdout.write("part 2: {result!s}".format(result=None))
+            result = games.power_cubes()
+            sys.stdout.write("part 2: {result!s}".format(result=result))
+            if result.value <= 8000:
+                sys.stdout.write("\ntoo low!")
             sys.stdout.write("\n")
             sys.stdout.flush()
     except Exception:
