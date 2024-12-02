@@ -1,0 +1,15 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"haskell.toolchain": {
+			"ghc": "9.2.1",
+			"hsl": "latest",
+			"cabal": "latest",
+			"stack": null
+		}
+	}
+}

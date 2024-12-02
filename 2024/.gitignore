@@ -1,0 +1,6 @@
+# haskell compiled artefacts
+*.exe
+*.hi
+*.o
+**/dist-newstyle
+CHANGELOG.md
