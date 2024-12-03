@@ -14,7 +14,7 @@ boolToInt b
 
 generateReport :: String -> Report
 generateReport reportLine = do
-    Report(map toInt (words reportLine))
+    Report (map toInt (words reportLine))
 
 generateReports :: String -> [Report]
 generateReports s = do
@@ -26,14 +26,17 @@ validate l f
  | length l < 2 = True
  | otherwise = f (head l) ((head.tail) l) && validate (tail l) f
 
-tolorantValidate :: [Integer] -> (Integer -> Integer -> Bool) -> Bool
-tolorantValidate l f
- | validate l f = True
-    
+dropValidate :: [Integer] -> (Integer -> Integer -> Bool) -> Int -> Bool
+dropValidate l f i = validate (take (i-1) l ++ drop i l) f
 
+tolorantValidate :: [Integer] -> (Integer -> Integer -> Bool) -> Bool
+tolorantValidate l f = do
+    let bound = dropValidate l f
+    let dropped = [0 .. ((fromIntegral.length) l)] :: [Int]
+    any bound dropped
 
 isDecreasing :: Integer -> Integer -> Bool
-isDecreasing a b = do 
+isDecreasing a b = do
     let x = a - b
     0 < x && x < 4
 
@@ -49,10 +52,10 @@ count :: [Bool] -> Integer
 count = sum.map boolToInt
 
 program :: String -> String
-program text = do 
+program text = do
     let reports = generateReports text
     let part1 = "part 1: " ++ show (count (map (isSafe validate) reports))
-    let part2 = "part 2: " ++ show (count (map (isSafe validate) reports))
+    let part2 = "part 2: " ++ show (count (map (isSafe tolorantValidate) reports))
     part1 ++ "\n" ++ part2
 
 main :: IO ()
