@@ -2,7 +2,6 @@ module Main where
 
 import Data.List
 import Data.Maybe
-import Debug.Trace
 
 data Point = Point Int Int
   deriving (Show)
@@ -57,19 +56,25 @@ lookupPoint s b (Point x y) =
     Nothing -> Nothing
     Just i -> Just (s !! i)
 
-xmasWalk :: String -> Bound -> Point -> Direction -> Int
-xmasWalk s b p d = do
-  let points = walk p d 3
+wordWalk :: String -> String -> Bound -> Point -> Direction -> Bool
+wordWalk w s b p d = do
+  let points = walk p d (-1 + length w)
   let chars = map (maybeToList . lookupPoint s b) points
   let xmasWord = foldr1 (++) chars :: String
-  if xmasWord == "XMAS"
-    then 1
-    else 0
+  xmasWord == w
+
+xmasWalk = wordWalk "XMAS"
 
 xmas :: String -> Bound -> (Char, Point) -> Int
 xmas s b (c, p) =
   if c == 'X'
-    then sum (map (xmasWalk s b p) searchDirections)
+    then sum (map (boolAsInt . xmasWalk s b p) searchDirections)
+    else 0
+
+boolAsInt :: Bool -> Int
+boolAsInt b =
+  if True
+    then 1
     else 0
 
 _XmasCount :: Int -> String -> Bound -> [(Char, Point)] -> Int
@@ -77,11 +82,27 @@ _XmasCount acc s b points
   | null points = acc
   | otherwise = _XmasCount (acc + xmas s b (head points)) s b (tail points)
 
-xmasCount :: String -> Int
-xmasCount s = _XmasCount 0 s (bounds s) (allPoints s)
+xmasCount :: String -> Bound -> [(Char, Point)] -> Int
+xmasCount = _XmasCount 0
 
-masCount :: String -> Int
-masCount s = undefined
+masCount :: String -> Bound -> [(Char, Point)] -> Int
+masCount = _MasCount 0
+
+_MasCount :: Int -> String -> Bound -> [(Char, Point)] -> Int
+_MasCount acc s b [] = acc
+_MasCount acc s b (('A', p) : px) =
+  if isMas s b p
+    then 1 + _MasCount acc s b px
+    else _MasCount acc s b px
+_MasCount acc s b ((c, p) : px) = _MasCount acc s b px
+
+isMas :: String -> Bound -> Point -> Bool
+isMas s b p = do
+  let left = (step p ((newDirection . pointFromTuple) (-1, -1)) 1, (newDirection . pointFromTuple) (1, 1))
+  let right = (step p ((newDirection . pointFromTuple) (-1, 1)) 1, (newDirection . pointFromTuple) (1, -1))
+  let leftChecked = uncurry (wordWalk "SAM" s b) left || uncurry (wordWalk "MAS" s b) left
+  let rightChecked = uncurry (wordWalk "SAM" s b) right || uncurry (wordWalk "MAS" s b) right
+  leftChecked && rightChecked
 
 _Bounds :: Point -> String -> Bound
 _Bounds (Point x y) s
@@ -95,13 +116,18 @@ bounds = _Bounds originPoint
 
 program :: String -> String
 program s = do
-  let part_1_value = xmasCount s :: Int
-  let b = bounds s
+  let bound = bounds s
+  let points = allPoints s
+  let part_1_value = xmasCount s bound points :: Int
+  let part_2_value = masCount s bound points :: Int
   "part 1: "
     ++ show part_1_value
     ++ "\n"
     ++ "bounds: "
-    ++ show b
+    ++ show bound
+    ++ "\n"
+    ++ "part 2: "
+    ++ show part_2_value
     ++ "\n"
 
 allPoints :: String -> [(Char, Point)]
