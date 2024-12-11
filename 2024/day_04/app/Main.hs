@@ -2,53 +2,95 @@ module Main where
 
 import Data.List
 import Data.Maybe
+import Debug.Trace
 
-data Point = Point Int Int deriving (Show)
+data Point = Point Int Int
+  deriving (Show)
+
+newtype Bound = Bound Point
+  deriving (Show)
+
+newtype Direction = Direction Point
 
 originPoint = Point 0 0
+
+searchDirections =
+  map
+    (newDirection . pointFromTuple)
+    [ (1, 1),
+      (0, 1),
+      (-1, 1),
+      (1, 0),
+      (0, 0),
+      (-1, 0),
+      (1, -1),
+      (0, -1),
+      (-1, -1)
+    ]
+
+pointFromTuple (x, y) = Point x y
+
+newDirection = Direction
 
 pointX (Point x y) = x
 
 pointY (Point x y) = y
 
-lookupPointIndex :: Point -> Point -> Maybe Int
-lookupPointIndex (Point bx by) (Point x y)
+step (Point aX aY) (Direction (Point bX bY)) stride = Point (aX + bX * stride) (aY + bY * stride)
+
+walk :: Point -> Direction -> Int -> [Point]
+walk point direction distance
+  | distance == 0 = [point]
+  | distance > 0 = walk point direction (distance - 1) ++ [step point direction distance]
+
+lookupPointIndex :: Bound -> Point -> Maybe Int
+lookupPointIndex (Bound (Point bx by)) (Point x y)
   | x < 0 = Nothing
   | bx < x = Nothing
   | y < 0 = Nothing
-  | by < y = Nothing
+  | by <= y = Nothing
   | otherwise = Just (y * (bx + 1) + x)
 
-lookupPoint :: String -> Point -> Point -> Maybe Char
+lookupPoint :: String -> Bound -> Point -> Maybe Char
 lookupPoint s b (Point x y) =
   case lookupPointIndex b (Point x y) of
     Nothing -> Nothing
     Just i -> Just (s !! i)
 
-xmas :: String -> Int
-xmas (x : m : a : s : sx)
-  | x /= 'X' = 0
-  | m /= 'M' = 0
-  | a /= 'A' = 0
-  | s /= 'S' = 0
-  | otherwise = 1
+xmasWalk :: String -> Bound -> Point -> Direction -> Int
+xmasWalk s b p d = do
+  let points = walk p d 3
+  let chars = map (maybeToList . lookupPoint s b) points
+  let xmasWord = foldr1 (++) chars :: String
+  if xmasWord == "XMAS"
+    then 1
+    else 0
 
-_XmasCount :: Int -> String -> Int
-_XmasCount acc s
-  | length s >= 4 = _XmasCount (acc + xmas s) (tail s)
-  | otherwise = acc
+xmas :: String -> Bound -> (Char, Point) -> Int
+xmas s b (c, p) =
+  if c == 'X'
+    then sum (map (xmasWalk s b p) searchDirections)
+    else 0
+
+_XmasCount :: Int -> String -> Bound -> [(Char, Point)] -> Int
+_XmasCount acc s b points
+  | null points = acc
+  | otherwise = _XmasCount (acc + xmas s b (head points)) s b (tail points)
 
 xmasCount :: String -> Int
-xmasCount = _XmasCount 0
+xmasCount s = _XmasCount 0 s (bounds s) (allPoints s)
 
-_Bounds :: Point -> String -> Point
+masCount :: String -> Int
+masCount s = undefined
+
+_Bounds :: Point -> String -> Bound
 _Bounds (Point x y) s
-  | null s = Point x y
+  | null s = Bound (Point x y)
   | y == 0 && head s /= '\n' = _Bounds (Point (x + 1) y) (tail s)
   | head s == '\n' = _Bounds (Point x (y + 1)) (tail s)
   | otherwise = _Bounds (Point x y) (tail s)
 
-bounds :: String -> Point
+bounds :: String -> Bound
 bounds = _Bounds originPoint
 
 program :: String -> String
@@ -90,7 +132,12 @@ lookupMapsCorrectly text = do
     else "\nlookupMapsCorrectly > " ++ show incorrectPoints
 
 tests :: String -> String
-tests text = foldr1 (++) ["tests: ", lookupMapsCorrectly text]
+tests text =
+  foldr1
+    (++)
+    [ "tests: ",
+      lookupMapsCorrectly text
+    ]
 
 main :: IO ()
 main = do
