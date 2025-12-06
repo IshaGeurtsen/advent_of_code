@@ -161,24 +161,16 @@ class Model:
                 buffer: list[str] = []
                 for item in col:
                     if not isinstance(item.value, int):
-                        del item
                         continue
                     if i in range(item.col, item.col+len(item.buffer)):
                         buffer.append(item.buffer[i - item.col])
-                    del item
                 row.append(int("".join(buffer)))
-                del i, buffer
-            del col_min, col_max
             for item in col:
                 if isinstance(item.value, int):
-                    del item
                     continue
                 row.append(item.value)
-                del item
             assert sum(1 for i in row if isinstance(i, OperationType)) == 1
             rows.append(row)
-            del col, row
-        del cols
         self.items.clear()
         col_max = 0
         rows.sort(key=len, reverse=True)
@@ -192,8 +184,8 @@ class Model:
                     assert j == len(row) - 1
                 col_max = max(col_max, col_min + len(buffer))
                 self.items.append(Item("".join(buffer), value, col=col_min, row=j))
-                self.items.sort()
             col_max += 1
+        self.items.sort()
 
 
 def part_1(path: Path):
@@ -205,6 +197,4 @@ def part_2(path: Path):
     with path.open() as file:
         model = Model.load(file)
         model.rotate()
-    with open("part_2_debug.txt", "wt") as file:
-        file.write(str(model))
     return model.evaluate()
