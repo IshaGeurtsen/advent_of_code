@@ -1,4 +1,5 @@
-import sys, math, itertools, typing, pathlib, functools, operator
+import sys, pathlib, functools, operator  # noqa
+
 
 class Junction:
     def __init__(self, x: int, y: int, z: int):
@@ -14,7 +15,7 @@ class Junction:
     def __repr__(self):
         return ",".join(map(repr, [self.x, self.y, self.z]))
 
-    def __eq__(self, other):
+    def __eq__(self, other: object):
         if isinstance(other, Junction):
             return self.x == other.x and self.y == other.y and self.z == other.z
         return NotImplemented
@@ -25,17 +26,19 @@ class Junction:
 
     def __lt__(self, other: "Junction"):
         return (
-            self.x < other.x or
-            (self.x == other.x and self.y < other.y)
-            or (self.x == other.x and self.y == other.y and self.z < other.z))
+            self.x < other.x
+            or (self.x == other.x and self.y < other.y)
+            or (self.x == other.x and self.y == other.y and self.z < other.z)
+        )
 
 
 class Circuit:
     def __init__(self, junction: Junction):
         self.junctions = {junction}
         self.parent = None
+
     @property
-    def root(self):
+    def root(self) -> "Circuit":
         if self.parent is None:
             return self
         else:
@@ -44,8 +47,8 @@ class Circuit:
     def is_connected(self, other: "Circuit"):
         return self.root is other.root
 
-    def __eq__(self, other):
-        return self.is_connected(other)
+    def __eq__(self, other: object):
+        return isinstance(other, Circuit) and self.is_connected(other)
 
     def __hash__(self):
         return hash(id(self.root))
@@ -67,19 +70,16 @@ class Circuit:
 def straight_line_distance_sq(p: Junction, q: Junction):
     return pow((p.x - q.x), 2) + pow((p.y - q.y), 2) + pow((p.z - q.y), 2)
 
+
 def distance(pair: tuple[Junction, Junction]):
     p, q = pair
     return straight_line_distance_sq(p, q)
 
+
 def part_1(text_: str):
     junction_boxes = set(map(Junction.from_str, text_.splitlines(keepends=False)))
     circuits = {junction: Circuit(junction) for junction in junction_boxes}
-    pairs = [
-        (p, q)
-        for p in junction_boxes
-        for q in junction_boxes
-        if p < q
-    ]
+    pairs = [(p, q) for p in junction_boxes for q in junction_boxes if p < q]
     pairs.sort(key=distance)
     connected_pairs = []
     for i in range(step_count):
