@@ -1,111 +1,191 @@
-import sys, pathlib, functools, operator  # noqa
+import sys
+from typing import NamedTuple, Iterable, Callable
+from dataclasses import dataclass, field
+from math import sqrt
 
 
-class Junction:
-    def __init__(self, x: int, y: int, z: int):
-        self.x = x
-        self.y = y
-        self.z = z
+class JunctionBox(NamedTuple):
+    X: int
+    Y: int
+    Z: int
 
     @classmethod
-    def from_str(cls, text: str):
-        x, y, z = text.split(",")
-        return Junction(int(x), int(y), int(z))
+    def from_position(cls, position: str):
+        return cls(*map(int, str.split(position, ",")))
 
-    def __repr__(self):
-        return ",".join(map(repr, [self.x, self.y, self.z]))
+    def __str__(self) -> str:
+        return ",".join(map(str, self))
 
-    def __eq__(self, other: object):
-        if isinstance(other, Junction):
-            return self.x == other.x and self.y == other.y and self.z == other.z
-        return NotImplemented
 
-    def __hash__(self):
-        x, y, z = self.x, self.y, self.z
-        return hash((x, y, z))
+class Pair(NamedTuple):
+    first: JunctionBox
+    last: JunctionBox
 
-    def __lt__(self, other: "Junction"):
-        return (
-            self.x < other.x
-            or (self.x == other.x and self.y < other.y)
-            or (self.x == other.x and self.y == other.y and self.z < other.z)
+    def straight_line_distance(self) -> float:
+        return sqrt(sum((self.first[i] - self.last[i]) ** 2 for i in range(3)))
+
+    def serialize(self):
+        return JunctionBoxes([self.first, self.last]).serialize()
+
+
+@dataclass
+class JunctionBoxes:
+    junction_boxes: list[JunctionBox] = field(default_factory=list[JunctionBox])
+
+    def serialize(self) -> str:
+        return "\n".join(map(str, self.junction_boxes))
+
+    def append(self, box: JunctionBox):
+        self.junction_boxes.append(box)
+
+    def __getitem__(self, index: int):
+        return self.junction_boxes[index]
+
+    def pairs(self) -> Iterable[Pair]:
+        for offset, box in enumerate(self.junction_boxes, 1):
+            for other in self.junction_boxes[offset:]:
+                yield Pair(box, other)
+
+    def closest(self) -> Pair:
+        return min(self.pairs(), key=Pair.straight_line_distance)
+
+    def __iter__(self):
+        return iter(self.junction_boxes)
+
+    def extend(self, other: Iterable[JunctionBox]):
+        self.junction_boxes.extend(other)
+
+    def __len__(self):
+        return len(self.junction_boxes)
+
+    @classmethod
+    def from_puzzle_input(cls, puzzle_input: Iterable[str]):
+        self = cls([])
+        for junction_box_position in puzzle_input:
+            self.append(JunctionBox.from_position(junction_box_position))
+        return self
+
+
+class CircuitServer:
+    def __init__(
+        self, boxes: JunctionBoxes, connection_limit: int, count_skips: bool
+    ) -> None:
+        from operator import call
+
+        @call
+        def _():
+            self.boxes = {box: id_ for id_, box in enumerate(boxes)}
+            self.ids = {id_: JunctionBoxes([box]) for box, id_ in self.boxes.items()}
+
+        self.boxes: dict[JunctionBox, int]
+        self.ids: dict[int, JunctionBoxes]
+        self.connection_count = 0
+        self.connection_limit = connection_limit
+        self.count_skips = count_skips
+
+    def __getitem__(self, box: JunctionBox):
+        return self.boxes[box]
+
+    def connect(self, pair: Pair):
+        id_a = self.boxes[pair.first]
+        id_b = self.boxes[pair.last]
+        id_min = min(id_a, id_b)
+        id_max = max(id_a, id_b)
+        # move boxes to id
+        self.ids[id_min].extend(self.ids[id_max])
+        # update the circuit id of the moved boxes
+        for box in self.ids[id_max]:
+            self.boxes[box] = id_min
+        # remove the disconnected circuit id
+        del self.ids[id_max]
+        # update stats
+        self.connection_count += 1
+
+    def connection_count_guard[T](self, it: Iterable[T]) -> Iterable[T]:
+        return CountGuard(it, lambda: self.connection_count < self.connection_limit - 1)
+
+    def circuit_sizes(self):
+        return [len(circuit) for circuit in self.ids.values()]
+
+    def skip(self, pair: Pair):
+        if self.count_skips:
+            self.connection_count += 1
+
+
+class CountGuard[T]:
+    def __init__(self, it: Iterable[T], condition: Callable[[], bool]) -> None:
+        self.it = iter(it)
+        self.condition = condition
+
+    def __next__(self):
+        if self.condition():
+            return next(self.it)
+        raise StopIteration
+
+    def __iter__(self):
+        return self
+
+
+def main():
+    path = sys.argv[1]
+    name = path.rpartition("/")[2].partition(".")[0]
+    match name:
+        case "example":
+            debug = True
+            limit = 10
+            count_skips = False
+        case "input":
+            debug = False
+            limit = 1000
+            count_skips = True
+        case _:
+            raise NotImplementedError
+    with open(path, "rt") as file:
+        puzzel_input = file.read().splitlines()
+
+    junction_boxes = JunctionBoxes.from_puzzle_input(puzzel_input)
+    if debug:
+        assert junction_boxes[0] == JunctionBox(X=162, Y=817, Z=812)
+
+    if debug:
+        assert junction_boxes.closest() == Pair(
+            JunctionBox.from_position("162,817,812"),
+            JunctionBox.from_position("425,690,689"),
         )
 
+    circuits = CircuitServer(
+        junction_boxes, connection_limit=limit, count_skips=count_skips
+    )
 
-class Circuit:
-    def __init__(self, junction: Junction):
-        self.junctions = {junction}
-        self.parent = None
-
-    @property
-    def root(self) -> "Circuit":
-        if self.parent is None:
-            return self
-        else:
-            return self.parent.root
-
-    def is_connected(self, other: "Circuit"):
-        return self.root is other.root
-
-    def __eq__(self, other: object):
-        return isinstance(other, Circuit) and self.is_connected(other)
-
-    def __hash__(self):
-        return hash(id(self.root))
-
-    def connect(self, other: "Circuit"):
-        assert not self.is_connected(other)
-        if self.parent is None and other.parent is None:
-            if id(self) < id(other):
-                self.parent = other
-                other.junctions |= self.junctions
-            else:
-                other.parent = self
-                self.junctions |= other.junctions
-
-    def size(self):
-        return len(self.root.junctions)
-
-
-def straight_line_distance_sq(p: Junction, q: Junction):
-    return pow((p.x - q.x), 2) + pow((p.y - q.y), 2) + pow((p.z - q.y), 2)
-
-
-def distance(pair: tuple[Junction, Junction]):
-    p, q = pair
-    return straight_line_distance_sq(p, q)
-
-
-def part_1(text_: str):
-    junction_boxes = set(map(Junction.from_str, text_.splitlines(keepends=False)))
-    circuits = {junction: Circuit(junction) for junction in junction_boxes}
-    pairs = [(p, q) for p in junction_boxes for q in junction_boxes if p < q]
-    pairs.sort(key=distance)
-    connected_pairs = []
-    for i in range(step_count):
-        p, q = pair = pairs[i]
-        if circuits[p].is_connected(circuits[q]):
+    pairs = junction_boxes.pairs()
+    pairs = list(pairs)
+    pairs.sort(key=Pair.straight_line_distance)
+    pairs = iter(pairs)
+    for pair in circuits.connection_count_guard(pairs):
+        if circuits[pair.first] == circuits[pair.last]:
+            circuits.skip(pair)
             continue
-        circuits[p].connect(circuits[q])
-        if circuits[p].root.junctions == junction_boxes:
-            break
-        connected_pairs.append(pair)
-    unique_circuits = {c.root for c in circuits.values()}
-    sizes = list(map(Circuit.size, unique_circuits))
-    sizes.sort(reverse=True)
-    print(sizes)
+        else:
+            circuits.connect(pair)
+            print("connect", pair.serialize(), sep="\n")
+            print(circuits.connection_count, circuits.connection_limit, sep=" / ")
 
-    return functools.reduce(operator.mul, sizes[:3])
+    circuit_sizes = circuits.circuit_sizes()
+    circuit_sizes.sort(reverse=True)
+    a, b, c = circuit_sizes[:3]
+    result = a * b * c
+    print(f"{result=}")
+    last_connection: Pair | None = None
+    for pair in pairs:
+        if circuits[pair.first] == circuits[pair.last]:
+            circuits.skip(pair)
+        else:
+            circuits.connect(pair)
+            last_connection = pair
+    assert last_connection is not None
+    result = last_connection.first.X * last_connection.last.X
+    print(f"{result=}")
 
 
 if __name__ == "__main__":
-    target = sys.argv[1]
-    target_name = pathlib.Path(target).name
-    step_count: int
-    if target_name == "example.txt":
-        step_count = 10
-    elif target_name == "input.txt":
-        step_count = 1000
-    with open(sys.argv[1]) as file:
-        text = file.read()
-        print("part 1:", part_1(text))
+    main()
